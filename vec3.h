@@ -1,6 +1,8 @@
 #ifndef VEC3_H
 #define VEC3_H
 
+#include <curand_kernel.h>
+
 class vec3 {
 public:
     float e[3];
@@ -41,6 +43,9 @@ public:
     __host__ __device__ float length_squared() const {
         return e[0]*e[0] + e[1]*e[1] + e[2]*e[2];
     }
+
+    __device__ inline static vec3 random(curandState *rs);
+    __device__ inline static vec3 random(float min, float max, curandState *rs);
 };
 
 // point3 is just an alias for vec3, but useful for geometric clarity in the code.
@@ -87,6 +92,31 @@ __host__ __device__ inline vec3 cross(const vec3& u, const vec3& v) {
 
 __host__ __device__ inline vec3 unit_vector(const vec3& v) {
     return v / v.length();
+}
+
+__device__ inline vec3 vec3::random(curandState *rs) {
+    return vec3(curand_uniform(rs), curand_uniform(rs), curand_uniform(rs));
+}
+
+__device__ inline vec3 vec3::random(float min, float max, curandState *rs) {
+    return vec3(min, min, min)
+         + (max - min) * vec3(curand_uniform(rs), curand_uniform(rs), curand_uniform(rs));
+}
+
+__device__ inline vec3 random_unit_vector(curandState *rs) {
+    while (true) {
+        vec3 p = vec3::random(-1, 1, rs);
+        float lensq = p.length_squared();
+        if (1e-44 < lensq && lensq <= 1)
+            return p / sqrt(lensq);
+    }
+}
+
+__device__ inline vec3 random_on_hemisphere(const vec3& normal, curandState *rs) {
+    vec3 on_unit_sphere = random_unit_vector(rs);
+    if (dot(on_unit_sphere, normal) > 0.0)
+        return on_unit_sphere;
+    return -on_unit_sphere;
 }
 
 inline std::ostream& operator<<(std::ostream& out, const vec3& v) {

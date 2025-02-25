@@ -1,10 +1,12 @@
-#include "constants.h"
+#include "utils.h"
+
 #include "camera.h"
 #include "hittable.h"
 #include "hittable_list.h"
 #include "interval.h"
 #include "sphere.h"
 
+#include <iostream>
 #include <curand_kernel.h>
 
 #define checkCudaErrors(val) check_cuda( (val), #val, __FILE__, __LINE__ )
@@ -37,14 +39,22 @@ __global__ void create_world(hittable **obj_list, hittable **world, camera **cam
     }
 }
 
-__device__ color ray_color(const ray& r, const hittable **world) {
-    hit_record rec;
-    if ((*world)->hit(r, interval(0, INFINITY), rec)) {
-        return 0.5f * (rec.normal + color(1.0f, 1.0f, 1.0f));
+__device__ color ray_color(const ray& r, const hittable **world, curandState *rs) {
+    ray cur_ray = r;
+    float cur_attenuation = 1.0f;
+    for (int i = 0; i < 50; i++) {
+        hit_record rec;
+        if ((*world)->hit(cur_ray, interval(0.001, INFINITY), rec)) {
+            vec3 direction = rec.normal + random_unit_vector(rs);
+            cur_ray = ray(rec.p, direction);
+            cur_attenuation *= 0.5f;
+        } else {
+            vec3 unit_direction = unit_vector(cur_ray.direction());
+            float a = 0.5f * (unit_direction.y() + 1.0f);
+            color bg = (1.0f-a)*color(1.0f, 1.0f, 1.0f) + a*color(0.5f, 0.7f, 1.0f);
+            return cur_attenuation * bg;
+        }
     }
-    vec3 unit_direction = unit_vector(r.direction());
-    float a = 0.5f * (unit_direction.y() + 1.0f);
-    return (1.0f-a)*color(1.0f, 1.0f, 1.0f) + a*color(0.5f, 0.7f, 1.0f);
 }
 
 __global__ void render(
@@ -67,7 +77,7 @@ __global__ void render(
         // float u = float(i + curand_uniform(&rands)) / float(iw);
         // float v = float(j + curand_uniform(&rands)) / float(ih);
         ray r = (*cam)->get_ray(i, j, &rs);
-        c += ray_color(r, const_cast<const hittable **>(world));
+        c += ray_color(r, const_cast<const hittable **>(world), &rs);
     }
     fb[pixel_index] = c / float(n_samples);
 }

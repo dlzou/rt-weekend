@@ -1,15 +1,10 @@
-#ifndef CONSTANTS_H
-#define CONSTANTS_H
+#ifndef UTILS_H
+#define UTILS_H
 
 #include <cmath>
 #include <iostream>
 #include <limits>
 #include <memory>
-
-// C++ Std Usings
-
-using std::make_shared;
-using std::shared_ptr;
 
 // Constants
 
@@ -20,8 +15,6 @@ const float pi = 3.1415926535897932385;
 inline float degrees_to_radians(float degrees) {
     return degrees * pi / 180.0;
 }
-
-// Common Headers
 
 #include "color.h"
 #include "ray.h"
