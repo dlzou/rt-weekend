@@ -10,6 +10,7 @@ add_executable(ray_tracer
     hittable_list.h
     interval.h
     main.cu
+    material.h
     ray.h
     sphere.h
     vec3.h
