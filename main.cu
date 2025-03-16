@@ -8,6 +8,7 @@
 #include "sphere.h"
 
 #include <curand_kernel.h>
+#include <fstream>
 #include <iostream>
 
 #define checkCudaErrors(val) check_cuda((val), #val, __FILE__, __LINE__)
@@ -37,8 +38,9 @@ __global__ void create_world(hittable **obj_list, hittable **world, camera **cam
     if (threadIdx.x == 0 && blockIdx.x == 0) {
         material *mat_ground = new lambertian(color(0.8, 0.8, 0.0));
         material *mat1 = new metal(color(0.8, 0.8, 0.8), 0.3);
-        material *mat2 = new lambertian(color(0.1, 0.2, 0.5));
-        material *mat3 = new metal(color(0.8, 0.6, 0.2), 1);
+        // material *mat2 = new lambertian(color(0.1, 0.2, 0.5));
+        material *mat2 = new dielectric(1.5);
+        material *mat3 = new metal(color(0.8, 0.6, 0.2), 1.0);
 
         // These dereferenced assignments to dynamic objects require double pointers.
         *(obj_list) = new sphere(point3(0, -100.5, -1), 100, mat_ground);
@@ -53,15 +55,38 @@ __global__ void create_world(hittable **obj_list, hittable **world, camera **cam
 
 __device__ color ray_color(const ray &r, const hittable **world, curandState *rs) {
     ray cur_ray = r;
-    color cur_attenuation = color(1.0f, 1.0f, 1.0f);
+    color cur_attenuation = color(1.0, 1.0, 1.0);
+    bool debug = false;
+    int tidx = threadIdx.x + blockDim.x * blockIdx.x;
+    int tidy = threadIdx.y + blockDim.y * blockIdx.y;
+    if (abs(cur_ray.direction()[0]) < 0.0007 && 
+        cur_ray.direction()[1] > 0.3995 &&
+        cur_ray.direction()[1] < 0.4005) {
+        debug = true;
+        printf("tid=(%i,%i) cur_ray = [%f, %f, %f]\n", tidx, tidy, cur_ray.direction()[0], cur_ray.direction()[1],
+               cur_ray.direction()[2]);
+    }
     for (int i = 0; i < 50; i++) {
         hit_record rec;
         if ((*world)->hit(cur_ray, interval(0.001, INFINITY), rec)) {
             ray scattered;
             color attenuation;
-            if (rec.mat->scatter(r, rec, attenuation, scattered, rs)) {
+            if (rec.mat->scatter(cur_ray, rec, attenuation, scattered, rs, debug)) {
                 cur_attenuation *= attenuation;
                 cur_ray = scattered;
+                if (debug) {
+                    printf("cur_ray = [%f, %f, %f] + [%f, %f, %f]*t, normal = [%f, %f, %f], front_face = %d\n", 
+                           cur_ray.origin()[0],
+                           cur_ray.origin()[1],
+                           cur_ray.origin()[2],
+                           cur_ray.direction()[0],
+                           cur_ray.direction()[1],
+                           cur_ray.direction()[2],
+                           rec.normal[0],
+                           rec.normal[1],
+                           rec.normal[2],
+                           rec.front_face);
+                }
             } else {
                 return color(0, 0, 0);
             }
@@ -134,13 +159,13 @@ int main() {
     curandState *d_rand_state;
     checkCudaErrors(cudaMalloc((void **)&d_rand_state, num_pixels * sizeof(curandState)));
 
-    // Render our buffer
+    // Render
     dim3 blocks((image_width + tx - 1) / tx, (image_height + ty - 1) / ty);
     dim3 threads(tx, ty);
-    std::clog << "blocks.x = " << blocks.x << "\n";
-    std::clog << "blocks.y = " << blocks.y << "\n";
-    std::clog << "threads.x = " << threads.x << "\n";
-    std::clog << "threads.y = " << threads.y << "\n";
+    std::cout << "blocks.x = " << blocks.x << std::endl;
+    std::cout << "blocks.y = " << blocks.y << std::endl;
+    std::cout << "threads.x = " << threads.x << std::endl;
+    std::cout << "threads.y = " << threads.y << std::endl;
 
     render_init<<<blocks, threads>>>(d_rand_state, image_width, image_height);
     render<<<blocks, threads>>>(fb, image_width, image_height, samples_per_pixel, d_camera, d_world,
@@ -148,19 +173,31 @@ int main() {
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
 
-    // Output FB as .ppm image
-    std::cout << "P3\n" << image_width << " " << image_height << "\n255\n";
-    for (int j = 0; j < image_height; j++) {
-        for (int i = 0; i < image_width; i++) {
-            size_t pixel_index = j * image_width + i;
-            color pixel_color = fb[pixel_index];
-            write_color(std::cout, pixel_color);
+    // Write output image
+
+    std::ofstream file;
+    std::string file_name = "image.ppm";
+    file.open(file_name, std::ios::trunc);
+
+    if (file.is_open()) {
+        // Output FB as .ppm image
+        file << "P3\n" << image_width << " " << image_height << "\n255\n";
+        for (int j = 0; j < image_height; j++) {
+            for (int i = 0; i < image_width; i++) {
+                size_t pixel_index = j * image_width + i;
+                color pixel_color = fb[pixel_index];
+                write_color(file, pixel_color);
+            }
         }
+        file.close();
+        std::cout << "Successfully wrote to " << file_name << std::endl;
+    } else {
+        std::cerr << "Unable to open file: " << file_name << std::endl;
     }
 
     // Free memory
     checkCudaErrors(cudaFree(fb));
     // TODO: free CUDA dynamic memory
 
-    std::clog << "Done.\n";
+    std::cout << "Done." << std::endl;
 }

@@ -120,8 +120,18 @@ __device__ inline vec3 random_on_hemisphere(const vec3 &normal, curandState *rs)
 
 __device__ inline vec3 reflect(const vec3 &v, const vec3 &n) { return v - 2 * dot(v, n) * n; }
 
+__device__ inline vec3 refract(const vec3 &uv, const vec3 &n, float eta_ratio, bool debug) {
+    float cos_theta = min(dot(-uv, n), 1.0);
+    vec3 r_out_perp = eta_ratio * (uv + cos_theta * n);
+    if (debug) {
+        printf("cos_theta = %f, r_out_perp = [%f, %f, %f], ", cos_theta, r_out_perp[0], r_out_perp[1], r_out_perp[2]);
+    }
+    vec3 r_out_parallel = -sqrt(abs(1.0 - r_out_perp.length_squared())) * n;
+    return r_out_perp + r_out_parallel;
+}
+
 inline std::ostream &operator<<(std::ostream &out, const vec3 &v) {
-    return out << '[' << v.e[0] << ' ' << v.e[1] << ' ' << v.e[2] << ']';
+    return out << '[' << v.e[0] << ", " << v.e[1] << ", " << v.e[2] << ']';
 }
 
 #endif

@@ -23,7 +23,7 @@ public:
         float sqrtd = sqrt(discriminant);
 
         // Find the nearest root that lies in the acceptable range.
-        auto root = (h - sqrtd) / a;
+        float root = (h - sqrtd) / a;
         if (!ray_t.surrounds(root)) {
             root = (h + sqrtd) / a;
             if (!ray_t.surrounds(root))
@@ -32,7 +32,8 @@ public:
 
         rec.t = root;
         rec.p = r.point_at(rec.t);
-        rec.normal = (rec.p - center) / radius;
+        vec3 outward_normal = (rec.p - center) / radius;
+        rec.set_face_normal(r, outward_normal);
         rec.mat = mat;
 
         return true;
