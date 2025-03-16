@@ -40,13 +40,15 @@ __global__ void create_world(hittable **obj_list, hittable **world, camera **cam
         material *mat1 = new metal(color(0.8, 0.8, 0.8), 0.3);
         // material *mat2 = new lambertian(color(0.1, 0.2, 0.5));
         material *mat2 = new dielectric(1.5);
+        material *mat2_bubble = new dielectric(1/1.5);
         material *mat3 = new metal(color(0.8, 0.6, 0.2), 1.0);
 
         // These dereferenced assignments to dynamic objects require double pointers.
         *(obj_list) = new sphere(point3(0, -100.5, -1), 100, mat_ground);
         *(obj_list + 1) = new sphere(point3(-1, 0, -1), 0.5, mat1);
         *(obj_list + 2) = new sphere(point3(0, 0, -1.2), 0.5, mat2);
-        *(obj_list + 3) = new sphere(point3(1, 0, -1), 0.5, mat3);
+        *(obj_list + 3) = new sphere(point3(0, 0, -1.2), 0.4, mat2_bubble);
+        *(obj_list + 4) = new sphere(point3(1, 0, -1), 0.5, mat3);
         *world = new hittable_list(obj_list, n_objects);
 
         *cam = new camera(iw, ih);
@@ -57,15 +59,15 @@ __device__ color ray_color(const ray &r, const hittable **world, curandState *rs
     ray cur_ray = r;
     color cur_attenuation = color(1.0, 1.0, 1.0);
     bool debug = false;
-    int tidx = threadIdx.x + blockDim.x * blockIdx.x;
-    int tidy = threadIdx.y + blockDim.y * blockIdx.y;
-    if (abs(cur_ray.direction()[0]) < 0.0007 && 
-        cur_ray.direction()[1] > 0.3995 &&
-        cur_ray.direction()[1] < 0.4005) {
-        debug = true;
-        printf("tid=(%i,%i) cur_ray = [%f, %f, %f]\n", tidx, tidy, cur_ray.direction()[0], cur_ray.direction()[1],
-               cur_ray.direction()[2]);
-    }
+    // int tidx = threadIdx.x + blockDim.x * blockIdx.x;
+    // int tidy = threadIdx.y + blockDim.y * blockIdx.y;
+    // if (abs(cur_ray.direction()[0]) < 0.0007 && 
+    //     cur_ray.direction()[1] > 0.3995 &&
+    //     cur_ray.direction()[1] < 0.4005) {
+    //     debug = true;
+    //     printf("tid=(%i,%i) cur_ray = [%f, %f, %f]\n", tidx, tidy, cur_ray.direction()[0], cur_ray.direction()[1],
+    //            cur_ray.direction()[2]);
+    // }
     for (int i = 0; i < 50; i++) {
         hit_record rec;
         if ((*world)->hit(cur_ray, interval(0.001, INFINITY), rec)) {
@@ -130,7 +132,7 @@ int main() {
 
     // Create world
 
-    int n_objects = 4;
+    int n_objects = 5;
 
     hittable **d_list;
     checkCudaErrors(cudaMalloc((void **)&d_list, n_objects * sizeof(hittable *)));

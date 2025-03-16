@@ -40,7 +40,7 @@ public:
         direction = unit_vector(direction) + (fuzz * random_unit_vector(rs));
         scattered = ray(rec.p, direction);
         attenuation = albedo;
-        return (dot(scattered.direction(), rec.normal) > 0);
+        return dot(scattered.direction(), rec.normal) > 0;
     }
 
 private:
@@ -58,15 +58,30 @@ public:
         float eta_ratio = rec.front_face ? (1.0 / refraction_index) : refraction_index;
 
         vec3 unit_direction = unit_vector(r_in.direction());
-        vec3 refracted = refract(unit_direction, rec.normal, eta_ratio, debug);
+        float cos_theta = min(dot(-unit_direction, rec.normal), 1.0);
+        float sin_theta = sqrt(1.0 - cos_theta * cos_theta);
 
-        scattered = ray(rec.p, refracted);
+        bool cannot_refract = eta_ratio * sin_theta > 1.0;
+        vec3 direction;
+        if (cannot_refract || reflectance(cos_theta, eta_ratio) > curand_uniform(rs))
+            direction = reflect(unit_direction, rec.normal);
+        else
+            direction = refract(unit_direction, rec.normal, eta_ratio, debug);
+
+        scattered = ray(rec.p, direction);
         return true;
     }
 
 private:
     // Refractive index of material when enclosed by vacuum
     float refraction_index;
+    
+    __device__ static float reflectance(float cos, float refraction_index) {
+        // Use Schlick's approximation for reflectance.
+        float r0 = (1 - refraction_index) / (1 + refraction_index);
+        r0 = r0 * r0;
+        return r0 + (1 - r0) * pow((1 - cos), 5);
+    }
 };
 
 #endif
