@@ -1,4 +1,4 @@
-#include "utils.h"
+#include "rt_weekend.h"
 
 #include "camera.h"
 #include "hittable.h"
@@ -34,24 +34,25 @@ __global__ void render_init(curandState *rand_state, int iw, int ih) {
 }
 
 __global__ void create_world(hittable **obj_list, hittable **world, camera **cam, int iw, int ih,
+                             float vfov, point3 look_from, point3 look_at, vec3 vup,
                              int n_objects) {
     if (threadIdx.x == 0 && blockIdx.x == 0) {
         material *mat_ground = new lambertian(color(0.8, 0.8, 0.0));
-        material *mat1 = new metal(color(0.8, 0.8, 0.8), 0.3);
-        // material *mat2 = new lambertian(color(0.1, 0.2, 0.5));
-        material *mat2 = new dielectric(1.5);
-        material *mat2_bubble = new dielectric(1/1.5);
-        material *mat3 = new metal(color(0.8, 0.6, 0.2), 1.0);
+        // material *mat1 = new metal(color(0.8, 0.8, 0.8), 0.3);
+        material *mat1 = new dielectric(1.5);
+        material *mat1_bubble = new dielectric(1 / 1.5);
+        material *mat2 = new lambertian(color(0.1, 0.2, 0.5));
+        material *mat3 = new metal(color(0.8, 0.6, 0.2), 0.3);
 
         // These dereferenced assignments to dynamic objects require double pointers.
         *(obj_list) = new sphere(point3(0, -100.5, -1), 100, mat_ground);
         *(obj_list + 1) = new sphere(point3(-1, 0, -1), 0.5, mat1);
-        *(obj_list + 2) = new sphere(point3(0, 0, -1.2), 0.5, mat2);
-        *(obj_list + 3) = new sphere(point3(0, 0, -1.2), 0.4, mat2_bubble);
+        *(obj_list + 2) = new sphere(point3(-1, 0, -1), 0.4, mat1_bubble);
+        *(obj_list + 3) = new sphere(point3(0, 0, -1.2), 0.5, mat2);
         *(obj_list + 4) = new sphere(point3(1, 0, -1), 0.5, mat3);
         *world = new hittable_list(obj_list, n_objects);
 
-        *cam = new camera(iw, ih);
+        *cam = new camera(iw, ih, vfov, look_from, look_at, vup);
     }
 }
 
@@ -61,11 +62,12 @@ __device__ color ray_color(const ray &r, const hittable **world, curandState *rs
     bool debug = false;
     // int tidx = threadIdx.x + blockDim.x * blockIdx.x;
     // int tidy = threadIdx.y + blockDim.y * blockIdx.y;
-    // if (abs(cur_ray.direction()[0]) < 0.0007 && 
+    // if (abs(cur_ray.direction()[0]) < 0.0007 &&
     //     cur_ray.direction()[1] > 0.3995 &&
     //     cur_ray.direction()[1] < 0.4005) {
     //     debug = true;
-    //     printf("tid=(%i,%i) cur_ray = [%f, %f, %f]\n", tidx, tidy, cur_ray.direction()[0], cur_ray.direction()[1],
+    //     printf("tid=(%i,%i) cur_ray = [%f, %f, %f]\n", tidx, tidy, cur_ray.direction()[0],
+    //     cur_ray.direction()[1],
     //            cur_ray.direction()[2]);
     // }
     for (int i = 0; i < 50; i++) {
@@ -77,25 +79,19 @@ __device__ color ray_color(const ray &r, const hittable **world, curandState *rs
                 cur_attenuation *= attenuation;
                 cur_ray = scattered;
                 if (debug) {
-                    printf("cur_ray = [%f, %f, %f] + [%f, %f, %f]*t, normal = [%f, %f, %f], front_face = %d\n", 
-                           cur_ray.origin()[0],
-                           cur_ray.origin()[1],
-                           cur_ray.origin()[2],
-                           cur_ray.direction()[0],
-                           cur_ray.direction()[1],
-                           cur_ray.direction()[2],
-                           rec.normal[0],
-                           rec.normal[1],
-                           rec.normal[2],
-                           rec.front_face);
+                    printf("cur_ray = [%f, %f, %f] + [%f, %f, %f]*t, normal = [%f, %f, %f], "
+                           "front_face = %d\n",
+                           cur_ray.origin()[0], cur_ray.origin()[1], cur_ray.origin()[2],
+                           cur_ray.direction()[0], cur_ray.direction()[1], cur_ray.direction()[2],
+                           rec.normal[0], rec.normal[1], rec.normal[2], rec.front_face);
                 }
             } else {
                 return color(0, 0, 0);
             }
         } else {
             vec3 unit_direction = unit_vector(cur_ray.direction());
-            float a = 0.5f * (unit_direction.y() + 1.0f);
-            color bg = (1.0f - a) * color(1.0f, 1.0f, 1.0f) + a * color(0.5f, 0.7f, 1.0f);
+            float a = 0.5 * (unit_direction.y() + 1.0);
+            color bg = (1.0 - a) * color(1.0, 1.0, 1.0) + a * color(0.5, 0.7, 1.0);
             return cur_attenuation * bg;
         }
     }
@@ -121,7 +117,7 @@ __global__ void render(color *fb, int iw, int ih, int n_samples, camera **cam, h
 int main() {
     // Image
 
-    float aspect_ratio = 16.0f / 9.0f;
+    float aspect_ratio = 16.0 / 9.0;
     int image_width = 400;
     int samples_per_pixel = 100;
 
@@ -129,6 +125,12 @@ int main() {
     int image_height = int(image_width / aspect_ratio);
     image_height = (image_height < 1) ? 1 : image_height;
     int num_pixels = image_width * image_height;
+
+    // Camera configuration parameters.
+    float vfov = 20;
+    point3 look_from(-2, 2, 1);
+    point3 look_at(0, 0, -1);
+    vec3 vup(0, 1, 0);
 
     // Create world
 
@@ -143,7 +145,8 @@ int main() {
     camera **d_camera;
     checkCudaErrors(cudaMalloc((void **)&d_camera, sizeof(camera *)));
 
-    create_world<<<1, 1>>>(d_list, d_world, d_camera, image_width, image_height, n_objects);
+    create_world<<<1, 1>>>(d_list, d_world, d_camera, image_width, image_height, vfov, look_from,
+                           look_at, vup, n_objects);
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
 
