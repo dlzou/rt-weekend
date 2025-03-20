@@ -1,6 +1,7 @@
 #include "rt_weekend.h"
 
 #include "camera.h"
+#include "ground.h"
 #include "hittable.h"
 #include "hittable_list.h"
 #include "interval.h"
@@ -23,7 +24,52 @@ void check_cuda(cudaError_t result, char const *const func, const char *const fi
     }
 }
 
-__global__ void render_init(curandState *rand_state, int iw, int ih) {
+__global__ void create_world(hittable **obj_list, hittable **world, int n_objects, curandState *rs) {
+    if (threadIdx.x == 0 && blockIdx.x == 0) {
+        curand_init(1984, 0, 0, rs);
+
+        material *mat_ground = new lambertian(color(0.8, 0.8, 0.8));
+        material *mat1 = new lambertian(color(0.1, 0.2, 0.5));
+        material *mat2 = new dielectric(1.5);
+        material *mat3 = new metal(color(0.8, 0.6, 0.2), 0);
+
+        // These dereferenced assignments to dynamic objects require double pointers.
+        *(obj_list) = new ground(ray(point3(0, 0, 0), vec3(0, 1, 0)), 10, mat_ground);
+        *(obj_list + 1) = new sphere(point3(-3.5, 1, -0.8), 1, mat1);
+        *(obj_list + 2) = new sphere(point3(-0.5, 1, 2), 1, mat2);
+        *(obj_list + 3) = new sphere(point3(2.5, 1, 1.5), 1, mat3);
+        
+        for (int i = 4; i < n_objects; i++) {
+            float choose_mat = curand_uniform(rs);
+            point3 center(curand_uniform(rs)*10-5, 0.2, curand_uniform(rs)*10-5);
+
+            if (choose_mat < 1.0/3.0) {
+                color albedo = color::random(rs);
+                material *mat = new lambertian(albedo);
+                *(obj_list + i) = new sphere(center, 0.2, mat);
+            } else if (choose_mat < 2.0/3.0) {
+                color albedo = color::random(0.5, 1, rs);
+                float fuzz = curand_uniform(rs) / 2;
+                material *mat = new metal(albedo, fuzz);
+                *(obj_list + i) = new sphere(center, 0.2, mat);
+            } else {
+                material *mat = new dielectric(1.5);
+                *(obj_list + i) = new sphere(center, 0.2, mat);
+            }
+        }
+
+        *world = new hittable_list(obj_list, n_objects);
+    }
+}
+
+__global__ void init_camera(camera **cam, int iw, int ih, float vfov, point3 look_from,
+                            point3 look_at, vec3 vup, float defocus_angle, float focus_dist) {
+    if (threadIdx.x == 0 && blockIdx.x == 0) {
+        *cam = new camera(iw, ih, vfov, look_from, look_at, vup, defocus_angle, focus_dist);
+    }
+}
+
+__global__ void init_render(curandState *rand_state, int iw, int ih) {
     int i = threadIdx.x + blockIdx.x * blockDim.x;
     int j = threadIdx.y + blockIdx.y * blockDim.y;
     if ((i >= iw) || (j >= ih))
@@ -31,29 +77,6 @@ __global__ void render_init(curandState *rand_state, int iw, int ih) {
 
     int pixel_index = j * iw + i;
     curand_init(1984, pixel_index, 0, &rand_state[pixel_index]);
-}
-
-__global__ void create_world(hittable **obj_list, hittable **world, camera **cam, int iw, int ih,
-                             float vfov, point3 look_from, point3 look_at, vec3 vup,
-                             int n_objects) {
-    if (threadIdx.x == 0 && blockIdx.x == 0) {
-        material *mat_ground = new lambertian(color(0.8, 0.8, 0.0));
-        // material *mat1 = new metal(color(0.8, 0.8, 0.8), 0.3);
-        material *mat1 = new dielectric(1.5);
-        material *mat1_bubble = new dielectric(1 / 1.5);
-        material *mat2 = new lambertian(color(0.1, 0.2, 0.5));
-        material *mat3 = new metal(color(0.8, 0.6, 0.2), 0.3);
-
-        // These dereferenced assignments to dynamic objects require double pointers.
-        *(obj_list) = new sphere(point3(0, -100.5, -1), 100, mat_ground);
-        *(obj_list + 1) = new sphere(point3(-1, 0, -1), 0.5, mat1);
-        *(obj_list + 2) = new sphere(point3(-1, 0, -1), 0.4, mat1_bubble);
-        *(obj_list + 3) = new sphere(point3(0, 0, -1.2), 0.5, mat2);
-        *(obj_list + 4) = new sphere(point3(1, 0, -1), 0.5, mat3);
-        *world = new hittable_list(obj_list, n_objects);
-
-        *cam = new camera(iw, ih, vfov, look_from, look_at, vup);
-    }
 }
 
 __device__ color ray_color(const ray &r, const hittable **world, curandState *rs) {
@@ -118,23 +141,17 @@ int main() {
     // Image
 
     float aspect_ratio = 16.0 / 9.0;
-    int image_width = 400;
-    int samples_per_pixel = 100;
+    int image_width = 1200;
+    int samples_per_pixel = 500;
 
     // Calculate the image height, and ensure that it's at least 1.
     int image_height = int(image_width / aspect_ratio);
     image_height = (image_height < 1) ? 1 : image_height;
     int num_pixels = image_width * image_height;
 
-    // Camera configuration parameters.
-    float vfov = 20;
-    point3 look_from(-2, 2, 1);
-    point3 look_at(0, 0, -1);
-    vec3 vup(0, 1, 0);
-
     // Create world
 
-    int n_objects = 5;
+    int n_objects = 50;
 
     hittable **d_list;
     checkCudaErrors(cudaMalloc((void **)&d_list, n_objects * sizeof(hittable *)));
@@ -142,11 +159,28 @@ int main() {
     hittable **d_world;
     checkCudaErrors(cudaMalloc((void **)&d_world, sizeof(hittable *)));
 
+    curandState *d_world_rand_state;
+    checkCudaErrors(cudaMalloc((void **)&d_world_rand_state, sizeof(curandState)));
+
+    create_world<<<1, 1>>>(d_list, d_world, n_objects, d_world_rand_state);
+    checkCudaErrors(cudaGetLastError());
+    checkCudaErrors(cudaDeviceSynchronize());
+
+    // Create camera
+
+    // Camera configuration parameters.
+    float vfov = 40;
+    point3 look_from(0, 1.5, 8);
+    point3 look_at(0, 1, 0);
+    vec3 vup(0, 1, 0);
+    float defocus_angle = 1.0;
+    float focus_dist = 6;
+
     camera **d_camera;
     checkCudaErrors(cudaMalloc((void **)&d_camera, sizeof(camera *)));
 
-    create_world<<<1, 1>>>(d_list, d_world, d_camera, image_width, image_height, vfov, look_from,
-                           look_at, vup, n_objects);
+    init_camera<<<1, 1>>>(d_camera, image_width, image_height, vfov, look_from, look_at, vup,
+                          defocus_angle, focus_dist);
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
 
@@ -172,7 +206,7 @@ int main() {
     std::cout << "threads.x = " << threads.x << std::endl;
     std::cout << "threads.y = " << threads.y << std::endl;
 
-    render_init<<<blocks, threads>>>(d_rand_state, image_width, image_height);
+    init_render<<<blocks, threads>>>(d_rand_state, image_width, image_height);
     render<<<blocks, threads>>>(fb, image_width, image_height, samples_per_pixel, d_camera, d_world,
                                 d_rand_state);
     checkCudaErrors(cudaGetLastError());
