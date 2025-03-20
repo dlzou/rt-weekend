@@ -1,7 +1,7 @@
 #include "rt_weekend.h"
 
 #include "camera.h"
-#include "ground.h"
+#include "disk.h"
 #include "hittable.h"
 #include "hittable_list.h"
 #include "interval.h"
@@ -9,6 +9,8 @@
 #include "sphere.h"
 
 #include <curand_kernel.h>
+
+#include <chrono>
 #include <fstream>
 #include <iostream>
 
@@ -28,13 +30,14 @@ __global__ void create_world(hittable **obj_list, hittable **world, int n_object
     if (threadIdx.x == 0 && blockIdx.x == 0) {
         curand_init(1984, 0, 0, rs);
 
-        material *mat_ground = new lambertian(color(0.8, 0.8, 0.8));
+        // material *mat_ground = new lambertian(color(0.8, 0.8, 0.8));
+        material *mat_ground = new metal(color(0.5, 0.5, 0.5), 0.3);
         material *mat1 = new lambertian(color(0.1, 0.2, 0.5));
         material *mat2 = new dielectric(1.5);
         material *mat3 = new metal(color(0.8, 0.6, 0.2), 0);
 
         // These dereferenced assignments to dynamic objects require double pointers.
-        *(obj_list) = new ground(ray(point3(0, 0, 0), vec3(0, 1, 0)), 10, mat_ground);
+        *(obj_list) = new disk(ray(point3(0, 0, 0), vec3(0, 1, 0)), 10, mat_ground);
         *(obj_list + 1) = new sphere(point3(-3.5, 1, -0.8), 1, mat1);
         *(obj_list + 2) = new sphere(point3(-0.5, 1, 2), 1, mat2);
         *(obj_list + 3) = new sphere(point3(2.5, 1, 1.5), 1, mat3);
@@ -101,13 +104,13 @@ __device__ color ray_color(const ray &r, const hittable **world, curandState *rs
             if (rec.mat->scatter(cur_ray, rec, attenuation, scattered, rs, debug)) {
                 cur_attenuation *= attenuation;
                 cur_ray = scattered;
-                if (debug) {
-                    printf("cur_ray = [%f, %f, %f] + [%f, %f, %f]*t, normal = [%f, %f, %f], "
-                           "front_face = %d\n",
-                           cur_ray.origin()[0], cur_ray.origin()[1], cur_ray.origin()[2],
-                           cur_ray.direction()[0], cur_ray.direction()[1], cur_ray.direction()[2],
-                           rec.normal[0], rec.normal[1], rec.normal[2], rec.front_face);
-                }
+                // if (debug) {
+                //     printf("cur_ray = [%f, %f, %f] + [%f, %f, %f]*t, normal = [%f, %f, %f], "
+                //            "front_face = %d\n",
+                //            cur_ray.origin()[0], cur_ray.origin()[1], cur_ray.origin()[2],
+                //            cur_ray.direction()[0], cur_ray.direction()[1], cur_ray.direction()[2],
+                //            rec.normal[0], rec.normal[1], rec.normal[2], rec.front_face);
+                // }
             } else {
                 return color(0, 0, 0);
             }
@@ -186,6 +189,8 @@ int main() {
 
     // Render
 
+    auto start = std::chrono::high_resolution_clock::now();
+
     // Allocate frame buffer
     size_t fb_size = 3 * num_pixels * sizeof(float);
     color *fb;
@@ -211,6 +216,9 @@ int main() {
                                 d_rand_state);
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
+
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start) / 1e6;
 
     // Write output image
 
@@ -238,5 +246,5 @@ int main() {
     checkCudaErrors(cudaFree(fb));
     // TODO: free CUDA dynamic memory
 
-    std::cout << "Done." << std::endl;
+    std::cout << "Rendered in " << duration.count() << " seconds" << std::endl;
 }

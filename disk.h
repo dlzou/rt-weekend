@@ -5,9 +5,9 @@
 #include "interval.h"
 #include "vec3.h"
 
-class ground : public hittable {
+class disk : public hittable {
 public:
-    __device__ ground(const ray &center_normal, float radius, material *mat)
+    __device__ disk(const ray &center_normal, float radius, material *mat)
         : center_normal(center_normal.origin(), unit_vector(center_normal.direction())),
           radius(max(0.0f, radius)), mat(mat) {}
 

@@ -4,7 +4,7 @@ project(ray_tracer VERSION 0.1.0 LANGUAGES CUDA CXX)
 
 add_executable(ray_tracer 
     camera.h
-    ground.h
+    disk.h
     color.h
     hittable.h
     hittable_list.h
