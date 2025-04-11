@@ -26,7 +26,7 @@ void check_cuda(cudaError_t result, char const *const func, const char *const fi
     }
 }
 
-__global__ void create_world(hittable **obj_list, hittable **world, int n_objects, curandState *rs) {
+__global__ void create_world(hittable **world, int n_objects, curandState *rs) {
     if (threadIdx.x == 0 && blockIdx.x == 0) {
         curand_init(1984, 0, 0, rs);
 
@@ -35,12 +35,14 @@ __global__ void create_world(hittable **obj_list, hittable **world, int n_object
         material *mat1 = new lambertian(color(0.1, 0.2, 0.5));
         material *mat2 = new dielectric(1.5);
         material *mat3 = new metal(color(0.8, 0.6, 0.2), 0);
+        
+        hittable **objects = new hittable*[n_objects];
 
         // These dereferenced assignments to dynamic objects require double pointers.
-        *(obj_list) = new disk(ray(point3(0, 0, 0), vec3(0, 1, 0)), 10, mat_ground);
-        *(obj_list + 1) = new sphere(point3(-3.5, 1, -0.8), 1, mat1);
-        *(obj_list + 2) = new sphere(point3(-0.5, 1, 2), 1, mat2);
-        *(obj_list + 3) = new sphere(point3(2.5, 1, 1.5), 1, mat3);
+        objects[0] = new disk(ray(point3(0, 0, 0), vec3(0, 1, 0)), 10, mat_ground);
+        objects[1] = new sphere(point3(-3.5, 1, -0.8), 1, mat1);
+        objects[2] = new sphere(point3(-0.5, 1, 2), 1, mat2);
+        objects[3] = new sphere(point3(2.5, 1, 1.5), 1, mat3);
         
         for (int i = 4; i < n_objects; i++) {
             float choose_mat = curand_uniform(rs);
@@ -49,19 +51,25 @@ __global__ void create_world(hittable **obj_list, hittable **world, int n_object
             if (choose_mat < 1.0/3.0) {
                 color albedo = color::random(rs);
                 material *mat = new lambertian(albedo);
-                *(obj_list + i) = new sphere(center, 0.2, mat);
+                objects[i] = new sphere(center, 0.2, mat);
             } else if (choose_mat < 2.0/3.0) {
                 color albedo = color::random(0.5, 1, rs);
                 float fuzz = curand_uniform(rs) / 2;
                 material *mat = new metal(albedo, fuzz);
-                *(obj_list + i) = new sphere(center, 0.2, mat);
+                objects[i] = new sphere(center, 0.2, mat);
             } else {
                 material *mat = new dielectric(1.5);
-                *(obj_list + i) = new sphere(center, 0.2, mat);
+                objects[i] = new sphere(center, 0.2, mat);
             }
         }
 
-        *world = new hittable_list(obj_list, n_objects);
+        *world = new hittable_list(objects, n_objects);
+    }
+}
+
+__global__ void free_world(hittable **world) {
+    if (threadIdx.x == 0 && blockIdx.x == 0) {
+        delete *world;
     }
 }
 
@@ -69,6 +77,12 @@ __global__ void init_camera(camera **cam, int iw, int ih, float vfov, point3 loo
                             point3 look_at, vec3 vup, float defocus_angle, float focus_dist) {
     if (threadIdx.x == 0 && blockIdx.x == 0) {
         *cam = new camera(iw, ih, vfov, look_from, look_at, vup, defocus_angle, focus_dist);
+    }
+}
+
+__global__ void free_camera(camera **cam) {
+    if (threadIdx.x == 0 && blockIdx.x == 0) {
+        delete *cam;
     }
 }
 
@@ -86,16 +100,6 @@ __device__ color ray_color(const ray &r, const hittable **world, curandState *rs
     ray cur_ray = r;
     color cur_attenuation = color(1.0, 1.0, 1.0);
     bool debug = false;
-    // int tidx = threadIdx.x + blockDim.x * blockIdx.x;
-    // int tidy = threadIdx.y + blockDim.y * blockIdx.y;
-    // if (abs(cur_ray.direction()[0]) < 0.0007 &&
-    //     cur_ray.direction()[1] > 0.3995 &&
-    //     cur_ray.direction()[1] < 0.4005) {
-    //     debug = true;
-    //     printf("tid=(%i,%i) cur_ray = [%f, %f, %f]\n", tidx, tidy, cur_ray.direction()[0],
-    //     cur_ray.direction()[1],
-    //            cur_ray.direction()[2]);
-    // }
     for (int i = 0; i < 50; i++) {
         hit_record rec;
         if ((*world)->hit(cur_ray, interval(0.001, INFINITY), rec)) {
@@ -104,13 +108,6 @@ __device__ color ray_color(const ray &r, const hittable **world, curandState *rs
             if (rec.mat->scatter(cur_ray, rec, attenuation, scattered, rs, debug)) {
                 cur_attenuation *= attenuation;
                 cur_ray = scattered;
-                // if (debug) {
-                //     printf("cur_ray = [%f, %f, %f] + [%f, %f, %f]*t, normal = [%f, %f, %f], "
-                //            "front_face = %d\n",
-                //            cur_ray.origin()[0], cur_ray.origin()[1], cur_ray.origin()[2],
-                //            cur_ray.direction()[0], cur_ray.direction()[1], cur_ray.direction()[2],
-                //            rec.normal[0], rec.normal[1], rec.normal[2], rec.front_face);
-                // }
             } else {
                 return color(0, 0, 0);
             }
@@ -156,16 +153,13 @@ int main() {
 
     int n_objects = 50;
 
-    hittable **d_list;
-    checkCudaErrors(cudaMalloc((void **)&d_list, n_objects * sizeof(hittable *)));
-
     hittable **d_world;
     checkCudaErrors(cudaMalloc((void **)&d_world, sizeof(hittable *)));
 
     curandState *d_world_rand_state;
     checkCudaErrors(cudaMalloc((void **)&d_world_rand_state, sizeof(curandState)));
 
-    create_world<<<1, 1>>>(d_list, d_world, n_objects, d_world_rand_state);
+    create_world<<<1, 1>>>(d_world, n_objects, d_world_rand_state);
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaDeviceSynchronize());
 
@@ -243,8 +237,15 @@ int main() {
     }
 
     // Free memory
+    free_world<<<1, 1>>>(d_world);
+    checkCudaErrors(cudaGetLastError());
+    free_camera<<<1, 1>>>(d_camera);
+    checkCudaErrors(cudaGetLastError());
+    checkCudaErrors(cudaFree(d_world));
+    checkCudaErrors(cudaFree(d_world_rand_state));
+    checkCudaErrors(cudaFree(d_camera));
+    checkCudaErrors(cudaFree(d_rand_state));
     checkCudaErrors(cudaFree(fb));
-    // TODO: free CUDA dynamic memory
 
     std::cout << "Rendered in " << duration.count() << " seconds" << std::endl;
 }

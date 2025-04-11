@@ -5,6 +5,9 @@
 
 class material {
 public:
+    __device__ virtual ~material() {};
+    __device__ virtual material *clone() const = 0;
+
     __device__ virtual bool scatter(const ray &r_in, const hit_record &rec, color &attenuation,
                                     ray &scattered, curandState *rs, bool debug) const {
         return false;
@@ -14,6 +17,10 @@ public:
 class lambertian : public material {
 public:
     __device__ lambertian(const color &albedo) : albedo(albedo) {}
+
+    __device__ lambertian *clone() const override {
+        return new lambertian(*this);
+    }
 
     __device__ bool scatter(const ray &r_in, const hit_record &rec, color &attenuation,
                             ray &scattered, curandState *rs, bool debug = false) const override {
@@ -34,6 +41,10 @@ class metal : public material {
 public:
     __device__ metal(const color &albedo, float fuzz) : albedo(albedo), fuzz(fuzz < 1 ? fuzz : 1) {}
 
+    __device__ metal *clone() const override {
+        return new metal(*this);
+    }
+
     __device__ bool scatter(const ray &r_in, const hit_record &rec, color &attenuation,
                             ray &scattered, curandState *rs, bool debug = false) const override {
         vec3 direction = reflect(r_in.direction(), rec.normal);
@@ -51,6 +62,10 @@ private:
 class dielectric : public material {
 public:
     __device__ dielectric(float refraction_index) : refraction_index(refraction_index) {}
+
+    __device__ dielectric *clone() const override {
+        return new dielectric(*this);
+    }
 
     __device__ bool scatter(const ray &r_in, const hit_record &rec, color &attenuation,
                             ray &scattered, curandState *rs, bool debug = false) const override {

@@ -22,6 +22,9 @@ public:
 
 class hittable {
 public:
+    __device__ virtual ~hittable() {};
+    __device__ virtual hittable *clone() const = 0;
+    
     __device__ virtual bool hit(const ray &r, interval ray_t, hit_record &rec) const = 0;
 };
 

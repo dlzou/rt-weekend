@@ -46,14 +46,6 @@ public:
         return ray(ray_origin, pixel - ray_origin);
     }
 
-    // int image_width;
-    // int image_height;
-
-    // float vfov = 90; // Vertical field of view
-    // point3 look_from = point3(0, 0, 0);
-    // point3 look_at = point3(0, 0, -1);
-    // vec3 vup = vec3(0, 1, 0);
-
 private:
     point3 camera_origin;
     point3 pixel_origin;

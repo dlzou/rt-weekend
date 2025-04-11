@@ -3,12 +3,30 @@
 
 #include "hittable.h"
 #include "interval.h"
+#include "material.h"
 #include "vec3.h"
 
 class sphere : public hittable {
 public:
     __device__ sphere(const point3 &center, float radius, material *mat)
         : center(center), radius(max(0.0f, radius)), mat(mat) {}
+
+    __device__ sphere(const sphere &other)
+        : center(other.center), radius(other.radius), mat(other.mat->clone()) {}
+
+    __device__ sphere &operator=(const sphere &other) {
+        if (this != &other) {
+            delete mat;
+            center = other.center;
+            radius = other.radius;
+            mat = other.mat->clone();
+        }
+        return *this;
+    }
+
+    __device__ ~sphere() override { delete mat; }
+
+    __device__ hittable *clone() const override { return new sphere(*this); }
 
     __device__ bool hit(const ray &r, interval ray_t, hit_record &rec) const override {
         vec3 oc = center - r.origin();
